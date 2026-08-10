@@ -217,8 +217,7 @@ export default {
     if (incomingUrl.pathname.startsWith("/nova")) {
 
       const novaPath =
-        incomingUrl.pathname.replace(/^\\/nova/, "") || "/";
-
+        incomingUrl.pathname.replace(/^\/nova/, "")
       const targetUrl =
         NOVA_URL + novaPath + incomingUrl.search;
 
