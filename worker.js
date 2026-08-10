@@ -1,37 +1,76 @@
 const NOVA_URL = "https://nova-9mjw.onrender.com";
 
+const READY_COOKIE = "NOVA_READY=1; Max-Age=600; Path=/; Secure; SameSite=Lax";
+
 export default {
   async fetch(request) {
     const incomingUrl = new URL(request.url);
 
     // ---------------------------------------------------------
-    // HEALTH CHECK
-    // This is called by the front-door browser every 2 seconds.
-    // It checks whether Nova/Render is responding.
+    // READ NOVA_READY COOKIE
     // ---------------------------------------------------------
+
+    const cookieHeader = request.headers.get("Cookie") || "";
+    const novaReady = cookieHeader
+      .split(";")
+      .some(cookie => cookie.trim() === "NOVA_READY=1");
+
+
+    // ---------------------------------------------------------
+    // HEALTH CHECK
+    //
+    // The front-door browser calls this while Render is waking.
+    // ---------------------------------------------------------
+
     if (incomingUrl.pathname === "/health") {
       try {
         const response = await fetch(NOVA_URL, {
           method: "GET",
+
           headers: {
-            "User-Agent": "Nova-Front-Door",
+            "User-Agent": "Nova-Cloudflare-Front-Door",
             "Cache-Control": "no-cache",
           },
+
+          redirect: "follow",
         });
+
+        if (response.ok) {
+          return new Response(
+            JSON.stringify({
+              ready: true,
+              status: response.status,
+            }),
+            {
+              status: 200,
+
+              headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": "no-store",
+
+                // Nova is awake.
+                // Remember that for the next 10 minutes.
+                "Set-Cookie": READY_COOKIE,
+              },
+            }
+          );
+        }
 
         return new Response(
           JSON.stringify({
-            ready: response.ok,
+            ready: false,
             status: response.status,
           }),
           {
             status: 200,
+
             headers: {
               "Content-Type": "application/json",
               "Cache-Control": "no-store",
             },
           }
         );
+
       } catch {
         return new Response(
           JSON.stringify({
@@ -40,6 +79,7 @@ export default {
           }),
           {
             status: 200,
+
             headers: {
               "Content-Type": "application/json",
               "Cache-Control": "no-store",
@@ -49,34 +89,74 @@ export default {
       }
     }
 
+
     // ---------------------------------------------------------
-    // IMMEDIATE NOVA FRONT DOOR
+    // ROOT "/"
     //
-    // IMPORTANT:
-    // We do NOT contact Render before returning this page.
-    // Therefore this UI can appear immediately.
+    // If Nova is already known to be awake:
+    //     proxy directly to Nova.
+    //
+    // If not:
+    //     immediately show the Nova front door.
     // ---------------------------------------------------------
-    if (
-      incomingUrl.pathname === "/" ||
-      incomingUrl.pathname === "/agent"
-    ) {
+
+    if (incomingUrl.pathname === "/") {
+
+      if (novaReady) {
+        return proxyToNova(request, incomingUrl);
+      }
+
+      // -------------------------------------------------------
+      // IMPORTANT:
+      //
+      // We DO NOT contact Render here.
+      //
+      // This HTML is returned immediately.
+      // -------------------------------------------------------
+
       const html = `<!DOCTYPE html>
+
 <html lang="en">
+
 <head>
+
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  >
 
   <title>Nova Skin Care & Hair Center</title>
 
+
   <style>
+
     * {
       box-sizing: border-box;
     }
 
+
+    :root {
+
+      --nova-green: #087f5b;
+      --nova-dark: #056044;
+      --nova-light: #35a879;
+
+      --nova-pale: #e8f7f0;
+
+      --text: #17382e;
+      --muted: #688078;
+
+    }
+
+
     html,
     body {
+
       margin: 0;
       min-height: 100%;
+
       font-family:
         Inter,
         ui-sans-serif,
@@ -85,99 +165,155 @@ export default {
         BlinkMacSystemFont,
         "Segoe UI",
         sans-serif;
+
+      color: var(--text);
+
     }
+
 
     body {
-      background: #f8faf9;
-      color: #16352b;
+      background: #f7faf8;
     }
 
-    /* ----------------------------------------
-       NOVA GREEN THEME
-       ---------------------------------------- */
 
-    :root {
-      --nova-green: #087f5b;
-      --nova-dark: #056044;
-      --nova-light: #35a879;
-      --nova-pale: #e8f7f0;
-      --nova-text: #16352b;
-      --nova-muted: #638077;
-    }
-
-    /* ----------------------------------------
+    /* ========================================================
        NAVBAR
-       ---------------------------------------- */
+       ======================================================== */
 
     .navbar {
+
       height: 80px;
+
       background: var(--nova-green);
+
       color: white;
+
       display: flex;
+
       align-items: center;
-      box-shadow: 0 4px 18px rgba(0, 80, 55, 0.15);
+
+      box-shadow:
+        0 4px 18px rgba(0, 80, 55, 0.15);
+
     }
+
 
     .nav-inner {
+
       width: 100%;
       max-width: 1200px;
+
       margin: auto;
+
       padding: 0 24px;
+
       display: flex;
+
       align-items: center;
+
       justify-content: space-between;
+
     }
+
 
     .brand {
+
       display: flex;
+
       align-items: center;
+
       gap: 12px;
+
     }
+
 
     .logo {
+
       width: 42px;
       height: 42px;
+
       border-radius: 50%;
+
       background: white;
+
       color: var(--nova-green);
+
       display: flex;
+
       align-items: center;
       justify-content: center;
+
       font-size: 20px;
+
       font-weight: 800;
+
     }
+
 
     .brand-name {
+
       font-size: 20px;
+
       font-weight: 650;
+
       letter-spacing: -0.3px;
+
     }
+
 
     .nav-links {
+
       display: flex;
-      gap: 28px;
+
       align-items: center;
+
+      gap: 27px;
+
       font-size: 15px;
+
       font-weight: 600;
+
     }
 
-    .nav-links span {
+
+    .nav-link {
       opacity: 0.95;
     }
 
+
     .login {
+
       background: white;
+
       color: var(--nova-green);
+
       padding: 10px 17px;
+
       border-radius: 8px;
+
       font-weight: 700;
+
     }
 
-    /* ----------------------------------------
+
+    /* ========================================================
        HERO
-       ---------------------------------------- */
+       ======================================================== */
 
     .hero {
+
+      min-height: 450px;
+
+      position: relative;
+
+      overflow: hidden;
+
+      display: flex;
+
+      align-items: center;
+
+      justify-content: center;
+
       background:
         linear-gradient(
           115deg,
@@ -186,123 +322,190 @@ export default {
         );
 
       color: white;
-      min-height: 430px;
 
-      display: flex;
-      align-items: center;
-      justify-content: center;
-
-      position: relative;
-      overflow: hidden;
     }
+
 
     .hero::before {
+
       content: "";
+
       position: absolute;
-      width: 500px;
-      height: 500px;
+
+      width: 520px;
+      height: 520px;
+
       border-radius: 50%;
-      background: rgba(255,255,255,0.07);
-      top: -220px;
+
+      background:
+        rgba(255,255,255,0.07);
+
+      top: -250px;
       right: -120px;
+
     }
+
 
     .hero::after {
+
       content: "";
+
       position: absolute;
-      width: 350px;
-      height: 350px;
+
+      width: 380px;
+      height: 380px;
+
       border-radius: 50%;
-      background: rgba(255,255,255,0.05);
-      bottom: -200px;
-      left: -100px;
+
+      background:
+        rgba(255,255,255,0.05);
+
+      bottom: -230px;
+      left: -120px;
+
     }
+
 
     .hero-content {
+
       position: relative;
+
       z-index: 2;
+
       text-align: center;
+
       max-width: 850px;
-      padding: 70px 24px;
+
+      padding:
+        70px 24px 145px;
+
     }
+
 
     .hero h1 {
+
       margin: 0 0 18px;
-      font-size: clamp(38px, 6vw, 64px);
+
+      font-size:
+        clamp(38px, 6vw, 64px);
+
       line-height: 1.05;
+
       font-weight: 800;
+
       letter-spacing: -1.5px;
+
     }
+
 
     .hero p {
-      margin: 0 auto 28px;
+
+      margin: 0 auto 30px;
+
       max-width: 680px;
-      font-size: clamp(18px, 2.5vw, 24px);
+
+      font-size:
+        clamp(18px, 2.5vw, 24px);
+
       line-height: 1.55;
+
       color: #e4fff3;
+
     }
 
-    .hero-buttons {
+
+    .buttons {
+
       display: flex;
-      gap: 14px;
+
       justify-content: center;
+
+      gap: 14px;
+
       flex-wrap: wrap;
+
     }
+
 
     .button {
+
       padding: 14px 25px;
+
       border-radius: 9px;
-      font-weight: 700;
-      font-size: 16px;
+
       background: white;
+
       color: var(--nova-green);
-      box-shadow: 0 8px 25px rgba(0,0,0,0.12);
-    }
 
-    .button-outline {
-      border: 2px solid white;
-      color: white;
-      padding: 12px 24px;
-      border-radius: 9px;
       font-weight: 700;
-    }
-
-    /* ----------------------------------------
-       WAITING / CONNECTION CARD
-       ---------------------------------------- */
-
-    .waiting-card {
-      position: absolute;
-      z-index: 10;
-
-      left: 50%;
-      bottom: 26px;
-      transform: translateX(-50%);
-
-      width: min(560px, calc(100% - 32px));
-
-      background: rgba(255,255,255,0.97);
-      color: var(--nova-text);
-
-      border-radius: 14px;
-
-      padding: 17px 20px;
 
       box-shadow:
-        0 15px 45px rgba(0, 60, 40, 0.20);
+        0 8px 25px rgba(0,0,0,0.12);
 
-      display: flex;
-      align-items: center;
-      gap: 15px;
-
-      transition:
-        transform 0.3s ease,
-        opacity 0.3s ease;
     }
 
+
+    .button-outline {
+
+      padding: 12px 24px;
+
+      border:
+        2px solid white;
+
+      border-radius: 9px;
+
+      color: white;
+
+      font-weight: 700;
+
+    }
+
+
+    /* ========================================================
+       SMART WAITING CARD
+       ======================================================== */
+
+    .waiting-card {
+
+      position: absolute;
+
+      z-index: 20;
+
+      left: 50%;
+      bottom: 25px;
+
+      transform: translateX(-50%);
+
+      width:
+        min(600px, calc(100% - 32px));
+
+      background:
+        rgba(255,255,255,0.98);
+
+      color: var(--text);
+
+      border-radius: 15px;
+
+      padding: 18px 20px;
+
+      display: flex;
+
+      align-items: center;
+
+      gap: 15px;
+
+      box-shadow:
+        0 18px 50px
+        rgba(0, 60, 40, 0.22);
+
+    }
+
+
     .status-icon {
-      width: 45px;
-      height: 45px;
+
+      width: 46px;
+      height: 46px;
+
       flex-shrink: 0;
 
       border-radius: 50%;
@@ -312,137 +515,220 @@ export default {
       color: var(--nova-green);
 
       display: flex;
+
       align-items: center;
       justify-content: center;
 
       font-size: 21px;
+
       font-weight: 800;
+
     }
+
 
     .status-content {
       flex: 1;
     }
 
+
     .status-title {
-      font-weight: 800;
+
       font-size: 15px;
-      margin-bottom: 3px;
+
+      font-weight: 800;
+
+      margin-bottom: 4px;
+
     }
+
 
     .status-message {
-      color: var(--nova-muted);
+
       font-size: 13px;
-      line-height: 1.4;
+
+      line-height: 1.45;
+
+      color: var(--muted);
+
     }
+
 
     .progress {
-      margin-top: 9px;
+
       height: 4px;
-      background: #e5eee9;
-      border-radius: 20px;
+
+      margin-top: 10px;
+
       overflow: hidden;
+
+      border-radius: 20px;
+
+      background: #e5eee9;
+
     }
+
 
     .progress-bar {
+
       height: 100%;
-      width: 35%;
-      background: var(--nova-green);
+
+      width: 30%;
+
       border-radius: 20px;
-      animation: progress 1.8s ease-in-out infinite;
+
+      background: var(--nova-green);
+
+      animation:
+        progress 1.7s
+        ease-in-out
+        infinite;
+
     }
 
+
     @keyframes progress {
+
       0% {
-        transform: translateX(-130%);
+        transform: translateX(-150%);
       }
 
       100% {
-        transform: translateX(330%);
+        transform: translateX(400%);
       }
+
     }
 
-    /* ----------------------------------------
+
+    /* ========================================================
        FEATURES
-       ---------------------------------------- */
+       ======================================================== */
 
     .features {
-      background: #f7f9f8;
+
       padding: 60px 24px;
+
+      background: #f7f9f8;
+
     }
 
+
     .features-inner {
+
       max-width: 1100px;
+
       margin: auto;
 
       display: grid;
+
       grid-template-columns:
         repeat(3, 1fr);
 
       gap: 30px;
+
     }
+
 
     .feature {
+
       text-align: center;
-      padding: 22px;
+
+      padding: 20px;
+
     }
 
+
     .feature-icon {
+
       width: 64px;
       height: 64px;
-      margin: auto auto 16px;
+
+      margin:
+        auto auto 16px;
 
       border-radius: 50%;
 
       background: var(--nova-green);
+
       color: white;
 
       display: flex;
+
       align-items: center;
       justify-content: center;
 
       font-size: 25px;
 
       box-shadow:
-        0 8px 20px rgba(8,127,91,0.18);
+        0 8px 20px
+        rgba(8,127,91,0.18);
+
     }
+
 
     .feature h3 {
-      margin: 0 0 9px;
+
+      margin:
+        0 0 9px;
+
       font-size: 19px;
+
     }
+
 
     .feature p {
+
       margin: 0;
+
       color: #667a72;
+
       line-height: 1.6;
+
       font-size: 14px;
+
     }
 
-    /* ----------------------------------------
+
+    /* ========================================================
        FOOTER
-       ---------------------------------------- */
+       ======================================================== */
 
     .footer {
-      background: var(--nova-green);
+
+      background:
+        var(--nova-green);
+
       color: white;
-      padding: 32px 24px;
+
       text-align: center;
+
+      padding: 32px 24px;
+
     }
+
 
     .footer-brand {
-      font-weight: 700;
+
       font-size: 18px;
+
+      font-weight: 700;
+
     }
+
 
     .footer-text {
-      color: #ccefe0;
+
       margin-top: 8px;
+
+      color: #ccefe0;
+
       font-size: 13px;
+
     }
 
-    /* ----------------------------------------
+
+    /* ========================================================
        MOBILE
-       ---------------------------------------- */
+       ======================================================== */
 
     @media (max-width: 800px) {
 
@@ -455,32 +741,26 @@ export default {
       }
 
       .hero {
-        min-height: 520px;
-      }
-
-      .hero-content {
-        padding-top: 45px;
-        padding-bottom: 120px;
+        min-height: 540px;
       }
 
       .features-inner {
         grid-template-columns: 1fr;
-        gap: 8px;
       }
 
-      .waiting-card {
-        bottom: 18px;
-      }
     }
 
   </style>
+
 </head>
+
 
 <body>
 
-  <!-- ==========================================
-       NOVA-STYLE FRONT DOOR
-       ========================================== -->
+
+  <!-- ======================================================
+       NOVA NAVBAR
+       ====================================================== -->
 
   <nav class="navbar">
 
@@ -488,7 +768,9 @@ export default {
 
       <div class="brand">
 
-        <div class="logo">N</div>
+        <div class="logo">
+          N
+        </div>
 
         <div class="brand-name">
           Nova Skin Care & Hair Center
@@ -496,12 +778,24 @@ export default {
 
       </div>
 
+
       <div class="nav-links">
 
-        <span>Home</span>
-        <span>About</span>
-        <span>Services</span>
-        <span>Contact</span>
+        <span class="nav-link">
+          Home
+        </span>
+
+        <span class="nav-link">
+          About
+        </span>
+
+        <span class="nav-link">
+          Services
+        </span>
+
+        <span class="nav-link">
+          Contact
+        </span>
 
         <span class="login">
           Staff Login
@@ -514,9 +808,9 @@ export default {
   </nav>
 
 
-  <!-- ==========================================
-       HERO
-       ========================================== -->
+  <!-- ======================================================
+       NOVA HERO
+       ====================================================== -->
 
   <section class="hero">
 
@@ -526,12 +820,14 @@ export default {
         Premium Skin & Hair Care
       </h1>
 
+
       <p>
         Experience luxury treatments with
-        scientifically proven results.
+        scientifically proven results
       </p>
 
-      <div class="hero-buttons">
+
+      <div class="buttons">
 
         <div class="button">
           Explore Services
@@ -546,28 +842,42 @@ export default {
     </div>
 
 
-    <!-- ========================================
-         WAITING CARD
-         ======================================== -->
+    <!-- ====================================================
+         WAITING EXPERIENCE
+         ==================================================== -->
 
     <div class="waiting-card">
 
-      <div class="status-icon" id="statusIcon">
+      <div
+        class="status-icon"
+        id="statusIcon"
+      >
         ✦
       </div>
 
+
       <div class="status-content">
 
-        <div class="status-title" id="statusTitle">
-          Preparing your Nova experience
+        <div
+          class="status-title"
+          id="statusTitle"
+        >
+          Welcome to Nova
         </div>
 
-        <div class="status-message" id="statusMessage">
-          We're getting everything ready for you.
+
+        <div
+          class="status-message"
+          id="statusMessage"
+        >
+          We're preparing your skincare experience.
         </div>
+
 
         <div class="progress">
+
           <div class="progress-bar"></div>
+
         </div>
 
       </div>
@@ -577,13 +887,14 @@ export default {
   </section>
 
 
-  <!-- ==========================================
+  <!-- ======================================================
        FEATURES
-       ========================================== -->
+       ====================================================== -->
 
   <section class="features">
 
     <div class="features-inner">
+
 
       <div class="feature">
 
@@ -638,10 +949,15 @@ export default {
 
       </div>
 
+
     </div>
 
   </section>
 
+
+  <!-- ======================================================
+       FOOTER
+       ====================================================== -->
 
   <footer class="footer">
 
@@ -657,19 +973,19 @@ export default {
   </footer>
 
 
-  <!-- ==========================================
-       RENDER READINESS CHECK
-       ========================================== -->
+  <!-- ======================================================
+       BACKGROUND NOVA READINESS CHECK
+       ====================================================== -->
 
   <script>
 
-    const statusTitle =
+    const title =
       document.getElementById("statusTitle");
 
-    const statusMessage =
+    const message =
       document.getElementById("statusMessage");
 
-    const statusIcon =
+    const icon =
       document.getElementById("statusIcon");
 
 
@@ -679,6 +995,7 @@ export default {
     async function checkNova() {
 
       attempts++;
+
 
       try {
 
@@ -690,86 +1007,105 @@ export default {
           }
         );
 
-        const data = await response.json();
+
+        const data =
+          await response.json();
 
 
         if (data.ready === true) {
 
-          statusIcon.textContent = "✓";
+          icon.textContent = "✓";
 
-          statusTitle.textContent =
+
+          title.textContent =
             "Nova is ready";
 
-          statusMessage.textContent =
+
+          message.textContent =
             "Everything is ready. Opening your Nova experience...";
 
 
           /*
-           * Important:
+           * / is intentional.
            *
-           * We stay on the Cloudflare domain.
-           *
-           * /nova/ is handled by the Worker proxy.
+           * The Worker has now stored NOVA_READY=1.
+           * The next request to / will therefore proxy
+           * directly to the real Nova homepage.
            */
+
           setTimeout(() => {
 
-            window.location.href = "/nova/";
+            window.location.replace("/");
 
           }, 600);
 
 
           return;
+
         }
 
 
-        // Different messages make the wait feel alive.
+        /*
+         * Make the waiting experience feel like
+         * the business is actually preparing.
+         */
 
         if (attempts === 1) {
 
-          statusTitle.textContent =
+          title.textContent =
             "Welcome to Nova";
 
-          statusMessage.textContent =
-            "We're preparing your skincare experience...";
+          message.textContent =
+            "Preparing your premium skincare experience...";
 
-        } else if (attempts === 2) {
+        }
 
-          statusTitle.textContent =
+        else if (attempts === 2) {
+
+          title.textContent =
             "Preparing your experience";
 
-          statusMessage.textContent =
-            "Our clinic is getting everything ready...";
+          message.textContent =
+            "We're getting Nova's services ready for you...";
 
-        } else if (attempts === 3) {
+        }
 
-          statusTitle.textContent =
+        else if (attempts === 3) {
+
+          title.textContent =
             "Almost there";
 
-          statusMessage.textContent =
-            "Connecting you to Nova's full experience...";
+          message.textContent =
+            "Connecting you with Nova's full experience...";
 
-        } else {
+        }
 
-          statusTitle.textContent =
+        else {
+
+          title.textContent =
             "Nova is getting ready";
 
-          statusMessage.textContent =
+          message.textContent =
             "Just a moment — your experience is almost ready.";
 
         }
 
+
       } catch {
 
-        statusTitle.textContent =
+        title.textContent =
           "Preparing Nova";
 
-        statusMessage.textContent =
+
+        message.textContent =
           "Connecting securely to the Nova experience...";
 
       }
 
 
-      // Check again in 2 seconds.
+      /*
+       * Check again after 2 seconds.
+       */
 
       setTimeout(checkNova, 2000);
 
@@ -777,26 +1113,22 @@ export default {
 
 
     /*
-     * Start immediately.
+     * IMPORTANT:
      *
-     * The front door has already been rendered.
-     * Render is contacted only AFTER the UI appears.
+     * The front door is already visible.
+     *
+     * Only now do we begin contacting Render.
      */
 
     checkNova();
 
   </script>
 
+
 </body>
+
 </html>`;
 
-
-      // -------------------------------------------------------
-      // CRITICAL:
-      //
-      // Return the front door immediately.
-      // No fetch(NOVA_URL) happens before this response.
-      // -------------------------------------------------------
 
       return new Response(html, {
         status: 200,
@@ -816,53 +1148,109 @@ export default {
 
 
     // ---------------------------------------------------------
-    // NOVA PROXY
+    // EVERYTHING ELSE
     //
-    // Once Nova is awake, requests to /nova/*
-    // are forwarded to Render.
-    // ---------------------------------------------------------
-
-    if (incomingUrl.pathname.startsWith("/nova")) {
-
-      const novaPath =
-        incomingUrl.pathname.replace(/^\/nova/, "") || "/";
-
-      const targetUrl =
-        NOVA_URL +
-        novaPath +
-        incomingUrl.search;
-
-      const proxyRequest =
-        new Request(targetUrl, request);
-
-      return fetch(proxyRequest);
-    }
-
-
-    // ---------------------------------------------------------
-    // GENERAL PROXY
-    //
-    // This allows Nova's:
-    //
-    // /static/...
     // /about/
     // /services/
     // /contact/
+    // /login/
+    // /dashboard/
+    // /static/
     // images
-    // CSS
     // JS
+    // CSS
     //
-    // to continue working through Cloudflare.
+    // all go directly through the proxy.
     // ---------------------------------------------------------
 
-    const targetUrl =
-      NOVA_URL +
-      incomingUrl.pathname +
-      incomingUrl.search;
-
-    const proxyRequest =
-      new Request(targetUrl, request);
-
-    return fetch(proxyRequest);
+    return proxyToNova(request, incomingUrl);
   },
 };
+
+
+// =============================================================
+// NOVA PROXY FUNCTION
+// =============================================================
+
+async function proxyToNova(request, incomingUrl) {
+
+  const targetUrl =
+    NOVA_URL +
+    incomingUrl.pathname +
+    incomingUrl.search;
+
+
+  const proxyRequest =
+    new Request(targetUrl, request);
+
+
+  const response =
+    await fetch(proxyRequest);
+
+
+  /*
+   * Copy the upstream response headers.
+   *
+   * This allows Django's cookies, content types,
+   * redirects, etc. to travel back to the browser.
+   */
+
+  const headers =
+    new Headers(response.headers);
+
+
+  /*
+   * Keep the browser on the Cloudflare front door
+   * when possible.
+   *
+   * If Django returns a redirect to the Render URL,
+   * rewrite it back to the Cloudflare URL.
+   */
+
+  const location =
+    headers.get("Location");
+
+
+  if (location) {
+
+    try {
+
+      const locationUrl =
+        new URL(location);
+
+
+      if (
+        locationUrl.hostname ===
+        "nova-9mjw.onrender.com"
+      ) {
+
+        const publicUrl =
+          new URL(
+            locationUrl.pathname +
+            locationUrl.search,
+            incomingUrl.origin
+          );
+
+
+        headers.set(
+          "Location",
+          publicUrl.toString()
+        );
+
+      }
+
+    } catch {
+      // Leave unusual Location headers untouched.
+    }
+  }
+
+
+  return new Response(
+    response.body,
+    {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    }
+  );
+}
